@@ -1,7 +1,6 @@
 import { HTMLElement, parse } from "node-html-parser";
 import * as fs from "node:fs/promises";
 import { sql } from "./db.js";
-import { Url } from "node:url";
 
 interface Search {
   id: number;
@@ -46,54 +45,41 @@ function createKslClient(): KslClient {
 async function getSearchResults(search: Search) {}
 
 async function main() {
-  // const html = await fs.readFile("gretsch_drum.html", "utf-8");
-  // const root = parse(html);
-  // const listingNodes = root.querySelectorAll("section");
+  console.log("Getting searches from db");
+  const searches = await getSearches();
+  for (const search of searches.slice(-1)) {
+    console.log(search);
+    const kslClient = createKslClient();
+    // const html = await fs.readFile("gretsch_drum.html", "utf-8");
+    const html = await kslClient.getSearchResults(new URL(search.url));
+    console.log(html.substring(0, 500));
+    const root = parse(html);
+    const listingNodes = root.querySelectorAll("section");
+    const listings = listingNodes.map(parseListingNode);
+    console.log(`Found ${listings.length} listings`);
 
-  // const listings = listingNodes.map(parseListingNode);
-  // for(const listing of listings) {
-  //   await sql`insert into listings ${sql(listing)}
-  //   on conflict (ksl_id) do nothing`
-  // }
+    console.log("Saving listings to db");
+    for (const listing of listings) {
+      const [{ listingId }] = await sql<{ listingId: number }[]>`
+        insert into listings ${sql(listing)}
+        on conflict (ksl_id) do update set
+          title = excluded.title,
+          price = excluded.price,
+          location = excluded.location
+        returning id as listing_id`;
 
-  `create table search_listings (
-    id int generated always as identity primary key,
-    search_id int references searches(id) not null,
-    listing_id int references listings(id) not null
-  )`
-
-  console.log("Getting searches from db")
-  const [search] = await getSearches();
-  console.log(search);
-  const kslClient = createKslClient();
-  const html = await fs.readFile("gretsch_drum.html", "utf-8");
-
-  // const html = await kslClient.getSearchResults(new URL(search.url));
-  console.log(html.substring(0, 500));
-  const root = parse(html);
-  const listingNodes = root.querySelectorAll("section");
-  const listings = listingNodes.map(parseListingNode);
-  console.log(`Found ${listings.length} listings`)
-
-  console.log("Saving listings to db")
-  for (const listing of listings) {
-    const [{listingId}] = await sql<{listingId: number}[]>`insert into listings ${sql(listing)}
-    on conflict (ksl_id) do update set
-     title = excluded.title,
-     price = excluded.price,
-     location = excluded.location
-    returning id as listing_id`;
-
-    await sql`insert into search_listings (search_id, listing_id)
-      values ( ${search.id}, ${listingId} )
-      on conflict (search_id, listing_id) do nothing`
+      await sql`insert into search_listings (search_id, listing_id)
+        values ( ${search.id}, ${listingId} )
+        on conflict (search_id, listing_id) do nothing`;
+    }
+    console.log("Saved listings to db");
+    await new Promise((r) =>
+      setTimeout(r, Math.floor(Math.random() * (10000 - 3000 + 1)) + 3000)
+    );
   }
-  console.log("Saved listings to db")
-
 
   function parseListingNode(listingNode: HTMLElement) {
     const listingIdRegex = /\/listing\/(\d+)/;
-    const priceRegex = /\$(\d+\.\d{2})/;
     const listingTitleNode = listingNode.querySelector(".item-info-title-link");
     const href = listingTitleNode?.querySelector("a")?.getAttribute("href");
     const rawPrice = listingNode.querySelector(
@@ -103,7 +89,7 @@ async function main() {
 
     const title = listingTitleNode?.text || "Missing title";
     const [, kslId = "Missing listing id"] = href?.match(listingIdRegex) || [];
-    const [, price = "Missing price"] = rawPrice?.match(priceRegex) || [];
+    const price = Number(rawPrice?.replace(/[^0-9.]/g, '')) || -1;
     const location = locationNode?.text || "Missing location";
 
     return { title, kslId, price, location };

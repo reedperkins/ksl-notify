@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node dist/main.js"
+    "start": "export $(cat .env | xargs) && node dist/main.js"
   },
   "keywords": [],
   "author": "",
