@@ -1,6 +1,7 @@
 import { HTMLElement, parse } from "node-html-parser";
 import * as fs from "node:fs/promises";
 import { sql } from "./db.js";
+import nodemailer from "nodemailer";
 
 interface Search {
   id: number;
@@ -42,12 +43,10 @@ function createKslClient(): KslClient {
   };
 }
 
-async function getSearchResults(search: Search) {}
-
-async function main() {
+async function importListings() {
   console.log("Getting searches from db");
   const searches = await getSearches();
-  for (const search of searches.slice(-1)) {
+  for (const search of searches) {
     console.log(search);
     const kslClient = createKslClient();
     // const html = await fs.readFile("gretsch_drum.html", "utf-8");
@@ -77,23 +76,98 @@ async function main() {
       setTimeout(r, Math.floor(Math.random() * (10000 - 3000 + 1)) + 3000)
     );
   }
+}
 
-  function parseListingNode(listingNode: HTMLElement) {
-    const listingIdRegex = /\/listing\/(\d+)/;
-    const listingTitleNode = listingNode.querySelector(".item-info-title-link");
-    const href = listingTitleNode?.querySelector("a")?.getAttribute("href");
-    const rawPrice = listingNode.querySelector(
-      ".item-info-price.info-line"
-    )?.text;
-    const locationNode = listingNode.querySelector("a.item-address");
+interface Listing {
+  id: number;
+  ksl_id: string;
+  title: string;
+  price: number;
+  location: string;
+}
 
-    const title = listingTitleNode?.text || "Missing title";
-    const [, kslId = "Missing listing id"] = href?.match(listingIdRegex) || [];
-    const price = Number(rawPrice?.replace(/[^0-9.]/g, '')) || -1;
-    const location = locationNode?.text || "Missing location";
+async function getListingsFromDb(): Promise<Listing[]> {
+  return await sql<Listing[]>`select * from listings`;
+}
 
-    return { title, kslId, price, location };
-  }
+interface Report {
+  createdOn: Date;
+  listings: Listing[];
+}
+
+function createListingReport(listings: Listing[]): Report {
+  return {
+    createdOn: new Date(),
+    listings,
+  };
+}
+
+interface EmailClient {
+  sendMessage(to: string, from: string, subject: string, body: string): void;
+}
+
+function createEmailClient(): EmailClient {
+  const appUser = process.env.FASTMAIL_APP_USER;
+  const appPassword = process.env.FASTMAIL_APP_PASSWORD;
+  if (!appUser || !appPassword) throw new Error("Missing email credentials");
+
+  const transporter = nodemailer.createTransport({
+    host: "smtp.fastmail.com",
+    port: 465,
+    secure: true,
+    auth: {
+      user: appUser,
+      pass: appPassword,
+    },
+  });
+
+  return {
+    async sendMessage(to: string, from: string, subject: string, body: string) {
+      const mailOptions = {
+        to,
+        from,
+        subject,
+        text: body,
+      };
+
+      try {
+        const info = await transporter.sendMail(mailOptions);
+        console.log("Email sent:", info.messageId);
+      } catch (error) {
+        console.error("Error sending email:", error);
+      }
+    },
+  };
+}
+
+async function sendReport(report: Report) {
+  const client = createEmailClient();
+  const message = JSON.stringify(report);
+  await client.sendMessage('reed@reedperkins.com', 'reed@reedperkins.com', 'KSL Notify report', message);
+}
+
+async function main() {
+  await importListings();
+  const listings = await getListingsFromDb();
+  const report = createListingReport(listings);
+  await sendReport(report);
+}
+
+function parseListingNode(listingNode: HTMLElement) {
+  const listingIdRegex = /\/listing\/(\d+)/;
+  const listingTitleNode = listingNode.querySelector(".item-info-title-link");
+  const href = listingTitleNode?.querySelector("a")?.getAttribute("href");
+  const rawPrice = listingNode.querySelector(
+    ".item-info-price.info-line"
+  )?.text;
+  const locationNode = listingNode.querySelector("a.item-address");
+
+  const title = listingTitleNode?.text || "Missing title";
+  const [, kslId = "Missing listing id"] = href?.match(listingIdRegex) || [];
+  const price = Number(rawPrice?.replace(/[^0-9.]/g, "")) || -1;
+  const location = locationNode?.text || "Missing location";
+
+  return { title, kslId, price, location };
 }
 
 await main().finally(async () => await sql.end());

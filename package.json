@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "export $(cat .env | xargs) && node dist/main.js"
+    "start": "npx tsc && export $(cat .env | xargs) && node dist/main.js"
   },
   "keywords": [],
   "author": "",
@@ -12,10 +12,12 @@
   "description": "",
   "dependencies": {
     "node-html-parser": "^7.0.1",
+    "nodemailer": "^6.10.0",
     "postgres": "^3.4.5"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
+    "@types/nodemailer": "^6.4.17",
     "prettier": "^3.5.1",
     "typescript": "^5.7.3"
   }
