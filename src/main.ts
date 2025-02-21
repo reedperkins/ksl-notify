@@ -59,18 +59,39 @@ async function importListings() {
 
     console.log("Saving listings to db");
     for (const listing of listings) {
-      const [{ listingId }] = await sql<{ listingId: number }[]>`
-        insert into listings ${sql(listing)}
-        on conflict (ksl_id) do update set
-          title = excluded.title,
-          price = excluded.price,
-          location = excluded.location
-        returning id as listing_id`;
+      const [existingListing] = await sql<[{ id: number; price: number }?]>`
+        select id, price::float from listings where ksl_id = ${listing.kslId}`;
 
-      await sql`insert into search_listings (search_id, listing_id)
-        values ( ${search.id}, ${listingId} )
-        on conflict (search_id, listing_id) do nothing`;
+      if (existingListing) {
+        if (listing.price !== existingListing.price) {
+          console.log("updating listing price");
+          await sql`
+            insert into listing_events (listing_id, type, data) 
+            values (
+              ${existingListing.id}, 
+              'price_changed', 
+              ${sql.json({ old: existingListing.price, new: listing.price })}
+            )`;
+        } else {
+          console.log(
+            "listing exists but there are no updates -- doing nothing"
+          );
+        }
+      } else {
+        console.log("creating new listing");
+        await sql.begin(async (tx) => {
+          const [{ id: listingId }] = await tx<[{ id: number }]>`
+            insert into listings ${sql(listing)} returning id`;
+          await tx`
+            insert into listing_events (listing_id, type)
+            values (${listingId}, 'discovered')`;
+          await tx`
+            insert into search_listings (search_id, listing_id)
+            values ( ${search.id}, ${listingId} )`;
+        });
+      }
     }
+
     console.log("Saved listings to db");
     await new Promise((r) =>
       setTimeout(r, Math.floor(Math.random() * (10000 - 3000 + 1)) + 3000)
@@ -86,19 +107,34 @@ interface Listing {
   location: string;
 }
 
-async function getListingsFromDb(): Promise<Listing[]> {
-  return await sql<Listing[]>`select * from listings`;
+async function getReportRows(): Promise<any> {
+  return await sql`
+    select
+      l.*,
+      JSONB_AGG(s.*) as searches,
+      JSONB_AGG(
+          jsonb_build_object(
+            'type', le."type",
+          'date', le.occured_on,
+          'data', le."data"
+          )
+        ) as history
+    from listings l
+    join search_listings sl on sl.listing_id = l.id
+    join searches s on sl.search_id = s.id
+    join listing_events le on le.listing_id = l.id
+    group by l.id`;
 }
 
 interface Report {
   createdOn: Date;
-  listings: Listing[];
+  rows: any[];
 }
 
-function createListingReport(listings: Listing[]): Report {
+function createListingReport(rows: any[]): Report {
   return {
     createdOn: new Date(),
-    listings,
+    rows,
   };
 }
 
@@ -140,17 +176,22 @@ function createEmailClient(): EmailClient {
   };
 }
 
-async function sendReport(report: Report) {
+function sendReport(report: Report) {
   const client = createEmailClient();
-  const message = JSON.stringify(report);
-  await client.sendMessage('reed@reedperkins.com', 'reed@reedperkins.com', 'KSL Notify report', message);
+  const message = JSON.stringify(report, null, 2);
+  client.sendMessage(
+    "reed@reedperkins.com",
+    "reed@reedperkins.com",
+    "KSL Notify report",
+    message
+  );
 }
 
 async function main() {
-  await importListings();
-  const listings = await getListingsFromDb();
-  const report = createListingReport(listings);
-  await sendReport(report);
+  // await importListings();
+  const rows = await getReportRows();
+  const report = createListingReport(rows);
+  sendReport(report);
 }
 
 function parseListingNode(listingNode: HTMLElement) {
