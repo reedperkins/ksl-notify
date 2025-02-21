@@ -135,7 +135,10 @@ interface Report {
 function createListingReport(rows: any[]): Report {
   return {
     createdOn: new Date(),
-    rows,
+    rows: rows.map((row: any) => ({
+      ...row,
+      link: `https://classifieds.ksl.com/listing/${row.kslId}`,
+    })),
   };
 }
 
