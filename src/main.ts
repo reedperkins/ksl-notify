@@ -123,6 +123,7 @@ async function getReportRows(): Promise<any> {
     join search_listings sl on sl.listing_id = l.id
     join searches s on sl.search_id = s.id
     join listing_events le on le.listing_id = l.id
+    where sent_on is null
     group by l.id`;
 }
 
@@ -179,19 +180,40 @@ function createEmailClient(): EmailClient {
 function sendReport(report: Report) {
   const client = createEmailClient();
   const message = JSON.stringify(report, null, 2);
-  client.sendMessage(
-    "reed@reedperkins.com",
-    "reed@reedperkins.com",
-    "KSL Notify report",
-    message
-  );
+  try {
+    client.sendMessage(
+      "reed@reedperkins.com",
+      "reed@reedperkins.com",
+      "KSL Notify report",
+      message
+    );
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(`Error sending email: ${message}`);
+    return false;
+  }
+  return true;
+}
+
+async function markListingsEventsAsSent(ids: number[]) {
+  await sql`
+    update listing_events set sent_on = now()
+    where id in ${sql(ids)}`;
 }
 
 async function main() {
-  // await importListings();
+  await importListings();
   const rows = await getReportRows();
+  if (!rows.length) {
+    console.log("No listing events to send!");
+    return;
+  }
   const report = createListingReport(rows);
-  sendReport(report);
+  const success = sendReport(report);
+  if (success) {
+    const ids: number[] = rows.map((row: any) => row.id);
+    await markListingsEventsAsSent(ids);
+  }
 }
 
 function parseListingNode(listingNode: HTMLElement) {
