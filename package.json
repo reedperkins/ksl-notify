@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "npx tsc && export $(cat .env | xargs) && node dist/main.js"
+    "build": "tsc",
+    "start": "tsc && export $(cat .env | xargs) && node dist/main.js"
   },
   "keywords": [],
   "author": "",

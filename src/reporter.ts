@@ -11,6 +11,12 @@ export const reporter: Reporter = {
 };
 
 async function sendReport() {
+  const toEmail = process.env.TO_EMAIL;
+  const fromEmail = process.env.FROM_EMAIL;
+  if(!toEmail || !fromEmail) {
+    console.error('Missing email variables');
+    return;
+  }
   try {
     const rows = await db.getReportRows();
     if (!rows.length) {
@@ -20,8 +26,8 @@ async function sendReport() {
     const report = createListingReport(rows);
     const message = JSON.stringify(report, null, 2);
     emailClient.sendMessage(
-      "reed@reedperkins.com",
-      "reed@reedperkins.com",
+      toEmail,
+      fromEmail,
       "KSL Notify report",
       message
     );
